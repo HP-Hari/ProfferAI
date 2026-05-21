@@ -1,6 +1,0 @@
-{
-  "name": "Proffer AI",
-  "description": "The AI sales workspace that remembers every deal and tells you what to do next.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}
