@@ -1,8 +1,0 @@
-[ignoring loop detection]
-SECTION 1: CRYPTOGRAPHIC CONTROL PROTOCOLS
-1. Does your application encrypt data in transit using TLS 1.3 or higher?
-2. Explain the mechanism used for encrypting data at rest and your cryptographic key rotation policies.
-
-SECTION 2: SLA & SUPPORT AGREEMENTS
-3. Detail your standard service level agreement (SLA) response times for Critical (Severity 1) security incidents.
-4. What is the frequency of business continuity and disaster recovery drills?
