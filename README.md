@@ -2,7 +2,7 @@
 
 > **The intelligent, cognitive sales workspace that remembers every deal, preserves organizational intelligence, and guides your next move.**
 
-Proffer AI is a premium, enterprise-grade AI sales copilot and workspace designed to accelerate sales pipelines and eliminate fragmented deal tracking. By integrating a persistent semantic memory layer (**Hindsight**) with a context-aware reasoning router (**CascadeFlow**), Proffer AI empowers Account Executives and Sales leaders to make data-driven decisions and generate highly personalized customer assets.
+Proffer AI is a premium, enterprise-grade AI sales copilot and workspace designed to accelerate sales pipelines and eliminate fragmented deal tracking. By integrating a persistent semantic memory layer (**Hindsight**) with a context-aware reasoning router (**CascadeFlow**) and a cloud database backend (**Firebase/Firestore**), Proffer AI empowers Account Executives and Sales leaders to make data-driven decisions and generate highly personalized customer assets.
 
 ---
 
@@ -24,6 +24,12 @@ At the core of the copilot is **CascadeFlow**, an agentic intelligence router po
 3. Chains reasoning steps together to deliver strategic guidance.
 4. Generates production-ready, actionable assets (like email drafts) directly into your workspace.
 
+### 🔥 Firebase & Firestore Database Integration
+Proffer AI now features full-stack **Firebase** integration for robust, scalable cloud hosting and data synchronization:
+* **Firebase Configuration (`firebase-applet-config.json`):** Sets up standard client connections to the high-performance Firebase cloud resources.
+* **Firestore Data Blueprint (`firebase-blueprint.json`):** Maps the structured collection schema `/user_workspaces/{userId}` storing isolating, individual deal cycle records (accounts, deals, tasks, activities, and Hindsight memories) for each authenticated session.
+* **Security Rules (`firestore.rules`):** Fully isolated user-level reads and writes for secure, production-ready enterprise environments.
+
 ---
 
 ## 🖥️ Core Workspace Modules
@@ -40,7 +46,7 @@ At the core of the copilot is **CascadeFlow**, an agentic intelligence router po
 ## 🛠️ Technology Stack
 
 * **Frontend:** React 19, TypeScript, Vite, Tailwind CSS, Motion (animations), Lucide Icons
-* **Backend:** Express API, Node.js
+* **Backend:** Express API, Node.js, Firebase SDK
 * **AI/LLM Engine:** Google Gemini SDK (`@google/genai`)
 
 ---
@@ -50,9 +56,10 @@ At the core of the copilot is **CascadeFlow**, an agentic intelligence router po
 ### Prerequisites
 * **Node.js** (v18 or higher recommended)
 * A **Gemini API Key** (optional, fallback local simulation provided)
+* Firebase CLI (optional, for deploying Firestore rules)
 
 ### Step 1: Install Dependencies
-Install all package dependencies for the React frontend and Express server:
+Install all package dependencies for the React frontend, Express server, and Firebase SDK:
 ```bash
 npm install
 ```

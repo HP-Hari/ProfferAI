@@ -1,0 +1,27 @@
+{
+  "entities": {
+    "UserWorkspace": {
+      "title": "UserWorkspace",
+      "description": "Stores the entire persistent sales cycle workspace state for an Account Executive",
+      "type": "object",
+      "properties": {
+        "accounts": { "type": "array", "description": "List of companies in the sales pipeline" },
+        "deals": { "type": "array", "description": "List of active deals being qualified" },
+        "stakeholders": { "type": "array", "description": "List of buyer contacts and their alignments" },
+        "activities": { "type": "array", "description": "Timeline log of all customer engagements and agent reflections" },
+        "objections": { "type": "array", "description": "Identified customer resistance points and resolution details" },
+        "tasks": { "type": "array", "description": "Ae task reminders, due dates, and suggested communication content" },
+        "memories": { "type": "array", "description": "Semantic Hindsight memory events recorded from calls" },
+        "reflections": { "type": "array", "description": "Agent dynamic insights" },
+        "savedDrafts": { "type": "array", "description": "Generated outbound email outreach templates saved by user" }
+      },
+      "required": ["accounts", "deals", "stakeholders", "activities", "objections", "tasks", "memories", "reflections", "savedDrafts"]
+    }
+  },
+  "firestore": {
+    "/user_workspaces/{userId}": {
+      "schema": "UserWorkspace",
+      "description": "Personal isolated deal cycles database state for each individual user authenticated session"
+    }
+  }
+}

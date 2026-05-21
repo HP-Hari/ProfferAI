@@ -14,8 +14,52 @@ const PORT = 3000;
 
 app.use(express.json());
 
-// In-memory Database state, loaded from seed data
-let db: DBState = JSON.parse(JSON.stringify(INITIAL_DB_STATE));
+// Initialize Firebase Client dynamically for server-side persistence using the provided credentials file
+const firebaseConfigPath = path.join(process.cwd(), 'firebase-applet-config.json');
+const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, 'utf8'));
+
+import { initializeApp } from 'firebase/app';
+import { getFirestore, doc, getDoc, setDoc } from 'firebase/firestore';
+
+const firebaseApp = initializeApp(firebaseConfig);
+const firestoreDb = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
+
+const getUserId = (req: express.Request): string => {
+  const headerId = req.headers['x-user-id'] || req.headers['authorization'];
+  if (headerId && typeof headerId === 'string') {
+    if (headerId.startsWith('Bearer ')) {
+      return headerId.substring(7);
+    }
+    return headerId;
+  }
+  return 'demo-ae-user-id';
+};
+
+const getUserWorkspace = async (userId: string): Promise<DBState> => {
+  try {
+    const docRef = doc(firestoreDb, 'user_workspaces', userId);
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      return docSnap.data() as DBState;
+    } else {
+      const initialClone = JSON.parse(JSON.stringify(INITIAL_DB_STATE)) as DBState;
+      await setDoc(docRef, initialClone);
+      return initialClone;
+    }
+  } catch (err) {
+    console.error(`Error loading or seeding workspace for user ${userId}:`, err);
+    return JSON.parse(JSON.stringify(INITIAL_DB_STATE)) as DBState;
+  }
+};
+
+const saveUserWorkspace = async (userId: string, state: DBState): Promise<void> => {
+  try {
+    const docRef = doc(firestoreDb, 'user_workspaces', userId);
+    await setDoc(docRef, state);
+  } catch (err) {
+    console.error(`Error saving workspace for user ${userId}:`, err);
+  }
+};
 
 // Initialize Gemini SDK with User-Agent header for telemetry
 const getGeminiClient = () => {
@@ -37,150 +81,180 @@ const getGeminiClient = () => {
 // REST API Endpoints for state management
 
 // Get current database state
-app.get('/api/db', (req, res) => {
-  res.json(db);
+app.get('/api/db', async (req, res) => {
+  const userId = getUserId(req);
+  const userDb = await getUserWorkspace(userId);
+  res.json(userDb);
 });
 
 // Reset database state to seed initial data
-app.post('/api/db/reset', (req, res) => {
-  db = JSON.parse(JSON.stringify(INITIAL_DB_STATE));
-  res.json({ success: true, db });
+app.post('/api/db/reset', async (req, res) => {
+  const userId = getUserId(req);
+  const initialClone = JSON.parse(JSON.stringify(INITIAL_DB_STATE)) as DBState;
+  await saveUserWorkspace(userId, initialClone);
+  res.json({ success: true, db: initialClone });
 });
 
 // Create/Update Task
-app.post('/api/tasks', (req, res) => {
+app.post('/api/tasks', async (req, res) => {
+  const userId = getUserId(req);
+  const userDb = await getUserWorkspace(userId);
   const task = req.body as TeamTask;
   if (!task.id) {
     task.id = 'task_' + Math.random().toString(36).substring(2, 9);
-    db.tasks.unshift(task);
+    userDb.tasks.unshift(task);
   } else {
-    const idx = db.tasks.findIndex(t => t.id === task.id);
+    const idx = userDb.tasks.findIndex(t => t.id === task.id);
     if (idx !== -1) {
-      db.tasks[idx] = { ...db.tasks[idx], ...task };
+      userDb.tasks[idx] = { ...userDb.tasks[idx], ...task };
     } else {
-      db.tasks.unshift(task);
+      userDb.tasks.unshift(task);
     }
   }
-  res.json({ success: true, task, db });
+  await saveUserWorkspace(userId, userDb);
+  res.json({ success: true, task, db: userDb });
 });
 
-app.post('/api/tasks/toggle', (req, res) => {
+app.post('/api/tasks/toggle', async (req, res) => {
+  const userId = getUserId(req);
+  const userDb = await getUserWorkspace(userId);
   const { id } = req.body;
-  const task = db.tasks.find(t => t.id === id);
+  const task = userDb.tasks.find(t => t.id === id);
   if (task) {
     task.status = task.status === 'pending' ? 'completed' : 'pending';
-    res.json({ success: true, task });
+    await saveUserWorkspace(userId, userDb);
+    res.json({ success: true, task, db: userDb });
   } else {
     res.status(404).json({ error: 'Task not found' });
   }
 });
 
 // Create Objection
-app.post('/api/objections', (req, res) => {
+app.post('/api/objections', async (req, res) => {
+  const userId = getUserId(req);
+  const userDb = await getUserWorkspace(userId);
   const obj = req.body as Objection;
   if (!obj.id) {
     obj.id = 'obj_' + Math.random().toString(36).substring(2, 9);
-    db.objections.unshift(obj);
+    userDb.objections.unshift(obj);
   } else {
-    const idx = db.objections.findIndex(o => o.id === obj.id);
+    const idx = userDb.objections.findIndex(o => o.id === obj.id);
     if (idx !== -1) {
-      db.objections[idx] = { ...db.objections[idx], ...obj };
+      userDb.objections[idx] = { ...userDb.objections[idx], ...obj };
     }
   }
-  res.json({ success: true, objection: obj, db });
+  await saveUserWorkspace(userId, userDb);
+  res.json({ success: true, objection: obj, db: userDb });
 });
 
-app.post('/api/objections/resolve', (req, res) => {
+app.post('/api/objections/resolve', async (req, res) => {
+  const userId = getUserId(req);
+  const userDb = await getUserWorkspace(userId);
   const { id, resolution } = req.body;
-  const obj = db.objections.find(o => o.id === id);
+  const obj = userDb.objections.find(o => o.id === id);
   if (obj) {
     obj.status = 'resolved';
     obj.resolution = resolution || 'Resolved by AE via alignment meeting.';
-    res.json({ success: true, objection: obj });
+    await saveUserWorkspace(userId, userDb);
+    res.json({ success: true, objection: obj, db: userDb });
   } else {
     res.status(404).json({ error: 'Objection not found' });
   }
 });
 
 // Save Email draft
-app.post('/api/drafts', (req, res) => {
+app.post('/api/drafts', async (req, res) => {
+  const userId = getUserId(req);
+  const userDb = await getUserWorkspace(userId);
   const draft = req.body as SavedDraft;
   if (!draft.id) {
     draft.id = 'drf_' + Math.random().toString(36).substring(2, 9);
     draft.createdAt = new Date().toISOString().split('T')[0];
-    db.savedDrafts.unshift(draft);
+    userDb.savedDrafts.unshift(draft);
   } else {
-    const idx = db.savedDrafts.findIndex(d => d.id === draft.id);
+    const idx = userDb.savedDrafts.findIndex(d => d.id === draft.id);
     if (idx !== -1) {
-      db.savedDrafts[idx] = { ...db.savedDrafts[idx], ...draft };
+      userDb.savedDrafts[idx] = { ...userDb.savedDrafts[idx], ...draft };
     }
   }
-  res.json({ success: true, draft, db });
+  await saveUserWorkspace(userId, userDb);
+  res.json({ success: true, draft, db: userDb });
 });
 
-app.delete('/api/drafts/:id', (req, res) => {
+app.delete('/api/drafts/:id', async (req, res) => {
+  const userId = getUserId(req);
+  const userDb = await getUserWorkspace(userId);
   const { id } = req.params;
-  db.savedDrafts = db.savedDrafts.filter(d => d.id !== id);
-  res.json({ success: true, db });
+  userDb.savedDrafts = userDb.savedDrafts.filter(d => d.id !== id);
+  await saveUserWorkspace(userId, userDb);
+  res.json({ success: true, db: userDb });
 });
 
 // Save direct manual Hindsight Memory Event
-app.post('/api/memories', (req, res) => {
+app.post('/api/memories', async (req, res) => {
+  const userId = getUserId(req);
+  const userDb = await getUserWorkspace(userId);
   const memory = req.body as MemoryEvent;
   if (!memory.id) {
     memory.id = 'mem_' + Math.random().toString(36).substring(2, 9);
     memory.timestamp = new Date().toISOString();
-    db.memories.unshift(memory);
+    userDb.memories.unshift(memory);
   }
-  res.json({ success: true, memory, db });
+  await saveUserWorkspace(userId, userDb);
+  res.json({ success: true, memory, db: userDb });
 });
 
 // Log custom call or note activity
-app.post('/api/activities', (req, res) => {
+app.post('/api/activities', async (req, res) => {
+  const userId = getUserId(req);
+  const userDb = await getUserWorkspace(userId);
   const activity = req.body as Activity;
   if (!activity.id) {
     activity.id = 'act_' + Math.random().toString(36).substring(2, 9);
     activity.timestamp = new Date().toISOString();
-    db.activities.unshift(activity);
+    userDb.activities.unshift(activity);
   }
-  res.json({ success: true, activity, db });
+  await saveUserWorkspace(userId, userDb);
+  res.json({ success: true, activity, db: userDb });
 });
 
 // Core AI Chat endpoint utilizing Hindsight context and CascadeFlow workflow routing
 app.post('/api/chat', async (req, res) => {
+  const userId = getUserId(req);
+  const userDb = await getUserWorkspace(userId);
   const { message, dealId, accountId } = req.body;
   const ai = getGeminiClient();
 
-  // 1. Identify Context details from mock DB
+  // 1. Identify Context details from user's custom DB
   let focusedDeal = null;
   let focusedAccount = null;
   let contextualSystemInstructions = '';
 
   if (dealId) {
-    focusedDeal = db.deals.find(d => d.id === dealId);
+    focusedDeal = userDb.deals.find(d => d.id === dealId);
     if (focusedDeal) {
-      focusedAccount = db.accounts.find(a => a.id === focusedDeal.accountId);
+      focusedAccount = userDb.accounts.find(a => a.id === focusedDeal.accountId);
     }
   } else if (accountId) {
-    focusedAccount = db.accounts.find(a => a.id === accountId);
-    focusedDeal = db.deals.find(d => d.accountId === accountId);
+    focusedAccount = userDb.accounts.find(a => a.id === accountId);
+    focusedDeal = userDb.deals.find(d => d.accountId === accountId);
   }
 
   // 2. Query Hindsight persistent memory to fetch associated records
-  const relevantMemories = db.memories.filter(m => {
-    return (dealId && m.dealId === dealId) || (accountId && db.deals.some(d => d.accountId === accountId && d.id === m.dealId));
+  const relevantMemories = userDb.memories.filter(m => {
+    return (dealId && m.dealId === dealId) || (accountId && userDb.deals.some(d => d.accountId === accountId && d.id === m.dealId));
   });
 
-  const relevantObjections = db.objections.filter(o => {
-    return (dealId && o.dealId === dealId) || (accountId && db.deals.some(d => d.accountId === accountId && d.id === o.dealId));
+  const relevantObjections = userDb.objections.filter(o => {
+    return (dealId && o.dealId === dealId) || (accountId && userDb.deals.some(d => d.accountId === accountId && d.id === o.dealId));
   });
   
-  const relevantTasks = db.tasks.filter(t => {
-    return (dealId && t.dealId === dealId) || (accountId && db.deals.some(d => d.accountId === accountId && d.id === t.dealId));
+  const relevantTasks = userDb.tasks.filter(t => {
+    return (dealId && t.dealId === dealId) || (accountId && userDb.deals.some(d => d.accountId === accountId && d.id === t.dealId));
   });
 
-  const relevantActivities = db.activities.filter(a => {
-    return (dealId && a.dealId === dealId) || (accountId && db.deals.some(d => d.accountId === accountId && d.id === a.dealId));
+  const relevantActivities = userDb.activities.filter(a => {
+    return (dealId && a.dealId === dealId) || (accountId && userDb.deals.some(d => d.accountId === accountId && d.id === a.dealId));
   });
 
   // Compile prompt background context
@@ -331,9 +405,9 @@ Based on Hindsight reflection feeds:
 
 I have compiled the comprehensive deal metrics for your active sales pipeline. 
 
-* **Active Coverage**: Tracking ${db.deals.filter(d => d.stage !== 'Closed Won').length} active enterprise engagements.
-* **Persistent History**: Scoped ${db.memories.length} historical events saved across the Hindsight memory fabric.
-* **Action Center**: Detected ${db.tasks.filter(t => t.status === 'pending').length} pending follow-up operations.
+* **Active Coverage**: Tracking ${userDb.deals.filter(d => d.stage !== 'Closed Won').length} active enterprise engagements.
+* **Persistent History**: Scoped ${userDb.memories.length} historical events saved across the Hindsight memory fabric.
+* **Action Center**: Detected ${userDb.tasks.filter(t => t.status === 'pending').length} pending follow-up operations.
 
 How can I help you accelerate your pipeline today? I can prepare brief sheets, answer objections, generate sequences, or review contract compliance obstacles.`;
     }
@@ -405,13 +479,14 @@ How can I help you accelerate your pipeline today? I can prepare brief sheets, a
     if (parsedResponse.risksDetected?.length > 0 && Math.random() > 0.6) {
       const generatedObservation: MemoryEvent = {
         id: 'mem_auto_' + Math.random().toString(36).substring(2, 9),
-        dealId: dealId || db.deals[0]?.id || '',
+        dealId: dealId || userDb.deals[0]?.id || '',
         timestamp: new Date().toISOString(),
         summary: `AI Agent Observation: Identified risk factor "${parsedResponse.risksDetected[0]}" after analyzing conversation.`,
         type: 'objection',
         score: 6
       };
-      db.memories.unshift(generatedObservation);
+      userDb.memories.unshift(generatedObservation);
+      await saveUserWorkspace(userId, userDb);
     }
 
     res.json(parsedResponse);

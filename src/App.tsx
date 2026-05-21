@@ -12,12 +12,13 @@ import TasksView from './components/TasksView.js';
 import TemplatesView from './components/TemplatesView.js';
 import SettingsView from './components/SettingsView.js';
 import { Sparkles, Moon, Sun, User, Bell, Search, Brain } from 'lucide-react';
+import { auth } from './firebase.js';
+import { onAuthStateChanged, signOut, User as FirebaseUser } from 'firebase/auth';
 
 export default function App() {
   // Authentication State
-  const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    return localStorage.getItem('proffer_logged_in') === 'true';
-  });
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
 
   // DB State populated from full-stack Express API
   const [db, setDb] = useState<DBState | null>(null);
@@ -30,10 +31,39 @@ export default function App() {
   // Input prefill link from templates
   const [templateInputText, setTemplateInputText] = useState('');
 
+  // Firebase auth state subscription
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        setCurrentUser(user);
+        setIsAuthenticated(true);
+      } else {
+        setCurrentUser(null);
+        setIsAuthenticated(false);
+        setDb(null);
+      }
+    });
+    return unsubscribe;
+  }, []);
+
+  // Pack security authentication headers
+  const getAuthHeaders = () => {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json'
+    };
+    if (auth.currentUser) {
+      headers['authorization'] = `Bearer ${auth.currentUser.uid}`;
+    }
+    return headers;
+  };
+
   // Fetch complete DB state from Express full-stack layer
   const fetchDbState = async () => {
+    if (!auth.currentUser) return;
     try {
-      const res = await fetch('/api/db');
+      const res = await fetch('/api/db', {
+        headers: getAuthHeaders()
+      });
       if (res.ok) {
         const data = await res.json();
         setDb(data);
@@ -44,8 +74,10 @@ export default function App() {
   };
 
   useEffect(() => {
-    fetchDbState();
-  }, []);
+    if (isAuthenticated) {
+      fetchDbState();
+    }
+  }, [isAuthenticated, currentUser]);
 
   // Update theme on DOM
   useEffect(() => {
@@ -58,17 +90,19 @@ export default function App() {
     localStorage.setItem('proffer_theme', theme);
   }, [theme]);
 
-  // Handle successful Demo User Auth login
+  // Handle successful Demo User Auth login login
   const handleLoginSuccess = () => {
     setIsAuthenticated(true);
-    localStorage.setItem('proffer_logged_in', 'true');
     setCurrentView('dashboard');
   };
 
   // Handle Logout
-  const handleLogout = () => {
-    setIsAuthenticated(false);
-    localStorage.removeItem('proffer_logged_in');
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+    } catch (err) {
+      console.error('Logout error:', err);
+    }
   };
 
   const handleToggleTheme = () => {
@@ -79,7 +113,10 @@ export default function App() {
   // Reset database back to default seeded metrics
   const handleResetDb = async () => {
     try {
-      const res = await fetch('/api/db/reset', { method: 'POST' });
+      const res = await fetch('/api/db/reset', { 
+        method: 'POST',
+        headers: getAuthHeaders()
+      });
       if (res.ok) {
         await fetchDbState();
       }
@@ -90,7 +127,7 @@ export default function App() {
 
   // Toggle dynamic task completion states
   const handleToggleTask = async (id: string) => {
-    if (!db) return;
+    if (!db || !auth.currentUser) return;
     
     // Optimistic UI updates
     const updatedTasks = db.tasks.map(t => {
@@ -102,7 +139,11 @@ export default function App() {
     setDb({ ...db, tasks: updatedTasks });
 
     try {
-      await fetch(`/api/tasks/${id}/toggle`, { method: 'POST' });
+      await fetch('/api/tasks/toggle', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ id })
+      });
     } catch (err) {
       console.error('Failed syncing task adjustment to backend:', err);
       // Revert if error
@@ -112,12 +153,12 @@ export default function App() {
 
   // Log custom updates notes live
   const handleLogActivity = async (activity: Activity) => {
-    if (!db) return;
+    if (!db || !auth.currentUser) return;
 
     try {
       const res = await fetch('/api/activities', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify(activity)
       });
       if (res.ok) {
@@ -130,7 +171,7 @@ export default function App() {
 
   // Clear Objection resolved on-the-spot
   const handleResolveObjection = async (id: string, resolution: string) => {
-    if (!db) return;
+    if (!db || !auth.currentUser) return;
 
     // Optimistic status mapping
     const updatedObjections = db.objections.map(o => {
@@ -144,7 +185,7 @@ export default function App() {
     try {
       const res = await fetch(`/api/objections/resolve`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ id, resolution })
       });
       if (res.ok) {
@@ -161,7 +202,7 @@ export default function App() {
     try {
       const res = await fetch('/api/tasks', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify(task)
       });
       if (res.ok) {
@@ -177,7 +218,7 @@ export default function App() {
     try {
       const res = await fetch('/api/drafts', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify(draft)
       });
       if (res.ok) {
@@ -192,7 +233,7 @@ export default function App() {
   const handleSubmitChat = async (message: string, dealId?: string, accountId?: string) => {
     const res = await fetch('/api/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ message, dealId, accountId })
     });
     if (res.ok) {
@@ -230,6 +271,11 @@ export default function App() {
       </div>
     );
   }
+
+  const userEmail = currentUser?.email || 'demo@proffer.ai';
+  const displayEmailName = userEmail.split('@')[0];
+  const capitalizedUserName = displayEmailName.charAt(0).toUpperCase() + displayEmailName.slice(1);
+  const userInitials = displayEmailName.substring(0, 2).toUpperCase();
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex transitioning-theme">
@@ -282,12 +328,12 @@ export default function App() {
 
             {/* Active Professional user info tag */}
             <div className="flex items-center gap-2.5 border-l border-slate-200/45 dark:border-slate-800/80 pl-4 py-1">
-              <div className="w-8 h-8 rounded-full bg-slate-200 dark:bg-[#11141D] text-slate-700 dark:text-slate-200 flex items-center justify-center font-bold text-xs select-none border dark:border-[#1E293B]">
-                SC
+              <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-teal-500/20 to-indigo-500/20 text-teal-400 dark:text-teal-350 flex items-center justify-center font-bold text-xs select-none border dark:border-[#1E293B]">
+                {userInitials}
               </div>
               <div className="text-left hidden sm:block">
-                <span className="block text-xs font-bold text-slate-800 dark:text-slate-200">Sarah Connor</span>
-                <span className="block text-[9px] text-slate-400 font-semibold font-mono uppercase">Principal AE</span>
+                <span className="block text-xs font-bold text-slate-800 dark:text-slate-200">{capitalizedUserName}</span>
+                <span className="block text-[9px] text-slate-400 font-semibold font-mono uppercase">Sales Professional</span>
               </div>
             </div>
           </div>
